@@ -40,11 +40,11 @@ def fetch_zkb_data(
 
     """
     pages = math.ceil(kill_counts/kills_per_request)
-    if pages > 10:
-        warnings.warn(
-            'ZKB only supports 10 pages on most queries',
-            UserWarning
-        )
+    #if pages > 10:
+    #    warnings.warn(
+    #        'ZKB only supports 10 pages on most queries',
+    #        UserWarning
+    #    )
 
     kills_list = []
     for page in cli.terminal.Progress(range(1, pages+1)):
@@ -87,6 +87,7 @@ def pivot_dict_pandas(
     print('--Dropping ignore_keys')
     raw_df = raw_df.drop(ignore_keys, 1)
 
+    print('--Pivoting dict_keys')
     for key in dict_keys:
         temp_df = pd.DataFrame(list(raw_df[key]))
         raw_df = pd.concat([raw_df, temp_df], axis=1)
@@ -125,11 +126,13 @@ class PandasZKBTest(cli.Application):
 
     def main(self):
         """project main goes here"""
-        print('Fetching raw data from zKillboard')
-        raw_kill_list = fetch_zkb_data(
-            self.query,
-            self.count
-        )
+        print('Fetching raw data from zKillboard: {}kms'.format(self.count))
+        with Timer() as fetch_zkb_timer:
+            raw_kill_list = fetch_zkb_data(
+                self.query,
+                self.count
+            )
+            print('--Time Elapsed: {}'.format(fetch_zkb_timer))
 
         print('Pivoting Data -- Dict keys with Pandas')
         with Timer() as pandas_dict_timer:
