@@ -9,6 +9,7 @@ Getting Started
 ===============
 
     ``pip install -r requirements.txt``
+    
     ``python pandas_zkb_test.py``
 
 Project is designed to run on any Python 3.5+ system.  Try out our methods on your own machine!
