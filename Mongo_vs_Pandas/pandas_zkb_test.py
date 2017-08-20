@@ -6,14 +6,17 @@ from datetime import datetime
 import math
 import warnings
 
+from contexttimer import Timer
 from plumbum import cli
 import pandas as pd
 import requests
 
 HERE = path.abspath(path.dirname(__file__))
 
-ZKB_URI = 'https://zkillboard.com/api/'
+DICT_KEYS = ['victim', 'position', 'zkb']
+LIST_KEYS = ['attackers', 'items']
 
+ZKB_URI = 'https://zkillboard.com/api/'
 def fetch_zkb_data(
         zkb_query,
         kill_counts,
@@ -44,7 +47,7 @@ def fetch_zkb_data(
         )
 
     kills_list = []
-    for page in cli.terminal.Progress(range(1,pages+1)):
+    for page in cli.terminal.Progress(range(1, pages+1)):
         req = requests.get(
             '{zkb_uri}{zkb_query}page/{page}/'.format(
                 zkb_uri=zkb_uri,
@@ -59,6 +62,39 @@ def fetch_zkb_data(
 
     return kills_list
 
+def pivot_dict_pandas(
+        raw_data,
+        dict_keys=DICT_KEYS,
+        ignore_keys=LIST_KEYS
+):
+    """pivot data -- dicts
+
+    Note:
+        Uses pandas-only approach
+
+    Args:
+        raw_data (:obj:`list`): raw zkb data to prase into frame
+        dict_keys (:obj:`list`, optional): keys to pivot
+        ignore_keys (:obj:`list`, optional): keys to drop
+
+    Returns:
+        (:obj:`pandas.DataFrame`): result data
+
+    """
+    print('--Parsing with Pandas')
+    raw_df = pd.DataFrame(raw_data)
+
+    print('--Dropping ignore_keys')
+    raw_df = raw_df.drop(ignore_keys, 1)
+
+    for key in dict_keys:
+        temp_df = pd.DataFrame(list(raw_df[key]))
+        raw_df = pd.concat([raw_df, temp_df], axis=1)
+
+    print('--Dropping dict_keys')
+    raw_df = raw_df.drop(dict_keys, 1)
+
+    return raw_df
 
 class PandasZKBTest(cli.Application):
     """Process zKillboard data into pandas with various transformation techniques"""
@@ -89,13 +125,18 @@ class PandasZKBTest(cli.Application):
 
     def main(self):
         """project main goes here"""
-        print('Hello world')
+        print('Fetching raw data from zKillboard')
         raw_kill_list = fetch_zkb_data(
             self.query,
             self.count
         )
-        with open('raw_zkb.json', 'w') as raw_fh:
-            json.dump(raw_kill_list, raw_fh, indent=2)
+
+        print('Pivoting Data -- Dict keys with Pandas')
+        with Timer() as pandas_dict_timer:
+            pandas_dict_df = pivot_dict_pandas(raw_kill_list)
+            print('--Time Elapsed: {}'.format(pandas_dict_timer))
+
+        pandas_dict_df.to_csv('pandas_dict_df.csv', index=False)
 
 if __name__ == '__main__':
     PandasZKBTest.run()
