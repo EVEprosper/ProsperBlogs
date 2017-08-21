@@ -1,6 +1,6 @@
 """pandas_zkb_test.py: demo script for timing/testing pandas data transformations"""
 
-from os import path
+from os import path, makedirs
 import json
 from datetime import datetime
 import math
@@ -23,7 +23,8 @@ def fetch_zkb_data(
         zkb_query,
         kill_counts,
         zkb_uri=ZKB_URI,
-        kills_per_request=200
+        kills_per_request=200,
+        dump_path=HERE
 ):
     """fetches raw list data from zkillboard.com
 
@@ -36,6 +37,7 @@ def fetch_zkb_data(
         kill_counts (int): number of kills to fetch
         zkb_uri (str, optional): root URI for zkb API fetches
         kills_per_request (int, optional): help figure out pagination
+        dump_path (str, optional): Path to read/write cache from
 
     Returns:
         (:obj:`list`): list of killmail objects
@@ -43,8 +45,9 @@ def fetch_zkb_data(
     """
     pages = math.ceil(kill_counts/kills_per_request)
     print('--checking cache')
-    if path.isfile(ZKB_CACHE_FILE):
-        with open(ZKB_CACHE_FILE, 'r') as zkb_fh:
+    cache_file = path.join(dump_path, ZKB_CACHE_FILE)
+    if path.isfile(cache_file):
+        with open(cache_file, 'r') as zkb_fh:
             cache = json.load(zkb_fh)
         if cache['query'] == zkb_query and cache['count'] == kill_counts:
             print('--returning cached response')
@@ -70,7 +73,7 @@ def fetch_zkb_data(
         'count': kill_counts,
         'data': kills_list
     }
-    with open('zkb_cache.json', 'w') as zkb_fh:
+    with open(cache_file, 'w') as zkb_fh:
         json.dump(zkb_cache, zkb_fh)
 
     return kills_list
@@ -142,6 +145,60 @@ def pivot_dict_native(
     print('--pushing data into Pandas')
     return pd.DataFrame(raw_result)
 
+def pivot_list_pandas_stack(
+        raw_data,
+        pivot_column,
+        index_column,
+        data_columns=DATA_KEYS
+):
+    """pivot list element with Pandas
+
+    Notes:
+        pandas method (not pure pandas)
+        can only pivot 1 column (think melt/unmelt)
+
+    Args:
+        raw_data (:obj:`list`): data to transform
+        pivot_column (str): name of column to pivot
+        index_column (str): which column to use for final index
+        data_columns (:obj:`list`, optional): data keys to keep along with pivoted data
+
+    Returns:
+        (:obj:`pandas.DataFrame`): pivoted data
+
+    """
+    print('--Preparing data in Pandas')
+    raw_df = pd.DataFrame(raw_data)
+    drop_cols = list(set(raw_df.columns.values) - set(data_columns))
+    drop_cols.remove(pivot_column)
+    raw_df = raw_df.drop(drop_cols, 1)
+
+    result_df = None
+    max_index = 0
+    for row in cli.terminal.Progress(list(raw_df.itertuples())):
+        data = getattr(row, pivot_column)
+        index = list(range(max_index, max_index + len(data)))
+        max_index = max_index + len(data)
+        row_df = pd.DataFrame(
+            data,
+            index=index
+        )   #pivot out data
+        row_df[index_column] = getattr(row, index_column)
+
+        #if not isinstance(result_df, pd.DataFrame):   #virgin pass
+        #    result_df = row_df
+        #    continue
+
+        result_df = pd.concat([result_df, row_df], axis=0)  #append to the end
+    #raw_df.to_csv('raw_df.csv', index=False)
+    #result_df.to_csv('result_df.csv', index=False)
+    result_df = result_df.join(
+        raw_df.drop(pivot_column, 1),
+        index_column,
+        lsuffix='_').drop(index_column + '_', 1)
+    return result_df
+
+
 def pivot_list_native(
         raw_data,
         pivot_column,
@@ -199,19 +256,31 @@ class PandasZKBTest(cli.Application):
     @cli.switch(
         ['c', '--count'],
         int,
-        help='Number of records to grab'
-    )
+        help='Number of records to grab')
     def override_count(self, count):
         """override expected kill count"""
         self.count = count
 
+    out_path = path.join(HERE, 'results')
+    @cli.switch(
+        ['o', '--out'],
+        str,
+        help='Path to dump csv and JSON results')
+    def override_out_path(self, out_path):
+        """override dump path"""
+        makedirs(out_path, exist_ok=True)
+        self.out_path = out_path
+
     def main(self):
         """project main goes here"""
-        print('Fetching raw data from zKillboard: {}kms'.format(self.count))
+        if not path.isdir(self.out_path):
+            makedirs(self.out_path, exist_ok=True)
+        print('Fetching raw data from zKillboard: {} records'.format(self.count))
         with Timer() as fetch_zkb_timer:
             raw_kill_list = fetch_zkb_data(
                 self.query,
-                self.count
+                self.count,
+                dump_path=self.out_path
             )
             print('--Time Elapsed: {}'.format(fetch_zkb_timer))
 
@@ -222,28 +291,60 @@ class PandasZKBTest(cli.Application):
         with Timer() as pandas_dict_timer:
             pandas_dict_df = pivot_dict_pandas(raw_kill_list)
             print('--Time Elapsed: {}'.format(pandas_dict_timer))
-        pandas_dict_df.to_csv('pandas_dict_df.csv', index=False)
+        pandas_dict_df.to_csv(
+            path.join(self.out_path, 'pandas_dict_df.csv'),
+            index=False
+        )
 
         print('Pivoting Data -- Dict keys with raw python')
         with Timer() as raw_dict_timer:
             raw_dict_df = pivot_dict_native(raw_kill_list)
             print('--Time Elapsed: {}'.format(raw_dict_timer))
-        raw_dict_df.to_csv('raw_dict_df.csv', index=False)
+        raw_dict_df.to_csv(
+            path.join(self.out_path, 'raw_dict_df.csv'),
+            index=False
+        )
 
         #################
         ## List Pivots ##
         #################
+        print('Pivoting Data -- List keys with Pandas (stack method)')
+        print('Items')
+        with Timer() as pandas_list_items_timer:
+            pandas_list_items_df = pivot_list_pandas_stack(raw_kill_list, 'items', 'killID')
+            print('--Time Elapsed: {}'.format(pandas_list_items_timer))
+        pandas_list_items_df.to_csv(
+            path.join(self.out_path, 'pandas_list_items_df.csv'),
+            index=False
+        )
+        print('Attackers')
+        with Timer() as pandas_list_attackers_timer:
+            pandas_list_attackers_df = pivot_list_pandas_stack(raw_kill_list, 'attackers', 'killID')
+            print('--Time Elapsed: {}'.format(pandas_list_attackers_timer))
+        pandas_list_attackers_df.to_csv(
+            path.join(self.out_path, 'pandas_list_attackers_df.csv'),
+            index=False
+        )
+
         print('Pivoting Data -- List keys with raw python')
         print('Items')
         with Timer() as raw_list_items_timer:
             raw_list_items_df = pivot_list_native(raw_kill_list, 'items')
             print('--Time Elapsed: {}'.format(raw_list_items_timer))
-        raw_list_items_df.to_csv('raw_list_items_df.csv', index=False)
+        raw_list_items_df.to_csv(
+            path.join(self.out_path, 'raw_list_items_df.csv'),
+            index=False
+        )
         print('Attackers')
         with Timer() as raw_list_attackers_timer:
             raw_list_attackers_df = pivot_list_native(raw_kill_list, 'attackers')
             print('--Time Elapsed: {}'.format(raw_list_attackers_timer))
-        raw_list_attackers_df.to_csv('raw_list_attackers_df.csv', index=False)
+        raw_list_attackers_df.to_csv(
+            path.join(self.out_path, 'raw_list_attackers_df.csv'),
+            index=False
+        )
+
+        print('Processing complete -- Have a nice day!')
 
 if __name__ == '__main__':
     PandasZKBTest.run()
