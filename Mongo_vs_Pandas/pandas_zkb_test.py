@@ -9,6 +9,7 @@ import warnings
 from contexttimer import Timer
 from plumbum import cli
 import pandas as pd
+import numpy as np
 import requests
 
 HERE = path.abspath(path.dirname(__file__))
@@ -167,7 +168,7 @@ def pivot_list_pandas_stack(
         (:obj:`pandas.DataFrame`): pivoted data
 
     """
-    print('--Preparing data in Pandas')
+    print('--Preparing data in Pandas -- concat')
     raw_df = pd.DataFrame(raw_data)
     drop_cols = list(set(raw_df.columns.values) - set(data_columns))
     drop_cols.remove(pivot_column)
@@ -185,17 +186,53 @@ def pivot_list_pandas_stack(
         )   #pivot out data
         row_df[index_column] = getattr(row, index_column)
 
-        #if not isinstance(result_df, pd.DataFrame):   #virgin pass
-        #    result_df = row_df
-        #    continue
-
         result_df = pd.concat([result_df, row_df], axis=0)  #append to the end
-    #raw_df.to_csv('raw_df.csv', index=False)
-    #result_df.to_csv('result_df.csv', index=False)
+
     result_df = result_df.join(
         raw_df.drop(pivot_column, 1),
         index_column,
         lsuffix='_').drop(index_column + '_', 1)
+    return result_df
+
+def pivot_list_pandas_melt(
+        raw_data,
+        pivot_column,
+        index_column,
+        data_columns=DATA_KEYS
+):
+    """pivot list element with Pandas
+
+    Notes:
+        pure pandas method
+
+    Args:
+        raw_data (:obj:`list`): data to transform
+        pivot_column (str): name of column to pivot
+        index_column (str): which column to use for final index
+        data_columns (:obj:`list`, optional): data keys to keep along with pivoted data
+
+    Returns:
+        (:obj:`pandas.DataFrame`): pivoted data
+
+    """
+    print('--Preparing data in Pandas -- melt')
+    raw_df = pd.DataFrame(raw_data)
+
+    print('--Pivoting list element -- {}'.format(pivot_column))
+    pivot_df = pd.DataFrame(list(raw_df[pivot_column]))             #pivot raw data
+    pivot_df = pd.concat([raw_df[index_column], pivot_df], axis=1)  #add index
+
+    print('--Melting frame into uniform shape')
+    pivot_df = pd.melt(pivot_df, id_vars=[index_column])#compress data into 1 col
+    pivot_df.dropna(axis=0, how='any', inplace=True)    #drop null vals
+
+    print('--Applying Dict-pivot to data values')
+    value_df = pd.DataFrame(list(pivot_df['value']))    #dict-pivot
+    value_df = pd.concat([pivot_df[index_column], value_df], axis=1) #drop raw data
+
+    print('--Joining data back into source frame')
+    result_df = raw_df.join(value_df, index_column, lsuffix='_')    #merge back to source
+    result_df = result_df.drop(index_column + '_', 1)   #tidy join column
     return result_df
 
 
@@ -315,7 +352,7 @@ class PandasZKBTest(cli.Application):
                 pandas_list_items_df = pivot_list_pandas_stack(raw_kill_list, 'items', 'killID')
                 print('--Time Elapsed: {}'.format(pandas_list_items_timer))
             pandas_list_items_df.to_csv(
-                path.join(self.out_path, 'pandas_list_items_df.csv'),
+                path.join(self.out_path, 'pandas_list_items_df-concat.csv'),
                 index=False
             )
             print('Attackers')
@@ -323,13 +360,31 @@ class PandasZKBTest(cli.Application):
                 pandas_list_attackers_df = pivot_list_pandas_stack(raw_kill_list, 'attackers', 'killID')
                 print('--Time Elapsed: {}'.format(pandas_list_attackers_timer))
             pandas_list_attackers_df.to_csv(
-                path.join(self.out_path, 'pandas_list_attackers_df.csv'),
+                path.join(self.out_path, 'pandas_list_attackers_df-concat.csv'),
                 index=False
             )
         else:
             print('************************************')
             print('**** SKIPPING PANDAS STACK TEST ****')
             print('************************************')
+
+        print('Pivoting Data -- List keys with Pandas (melt method)')
+        print('Items')
+        with Timer() as pandas_list_items_timer:
+            pandas_list_items_df = pivot_list_pandas_melt(raw_kill_list, 'items', 'killID')
+            print('--Time Elapsed: {}'.format(pandas_list_items_timer))
+        pandas_list_items_df.to_csv(
+            path.join(self.out_path, 'pandas_list_items_df-melt.csv'),
+            index=False
+        )
+        print('Attackers')
+        with Timer() as pandas_list_attackers_timer:
+            pandas_list_attackers_df = pivot_list_pandas_melt(raw_kill_list, 'attackers', 'killID')
+            print('--Time Elapsed: {}'.format(pandas_list_attackers_timer))
+        pandas_list_attackers_df.to_csv(
+            path.join(self.out_path, 'pandas_list_attackers_df-melt.csv'),
+            index=False
+        )
 
         print('Pivoting Data -- List keys with raw python')
         print('Items')
