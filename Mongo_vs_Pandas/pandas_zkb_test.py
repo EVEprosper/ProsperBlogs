@@ -308,23 +308,28 @@ class PandasZKBTest(cli.Application):
         #################
         ## List Pivots ##
         #################
-        print('Pivoting Data -- List keys with Pandas (stack method)')
-        print('Items')
-        with Timer() as pandas_list_items_timer:
-            pandas_list_items_df = pivot_list_pandas_stack(raw_kill_list, 'items', 'killID')
-            print('--Time Elapsed: {}'.format(pandas_list_items_timer))
-        pandas_list_items_df.to_csv(
-            path.join(self.out_path, 'pandas_list_items_df.csv'),
-            index=False
-        )
-        print('Attackers')
-        with Timer() as pandas_list_attackers_timer:
-            pandas_list_attackers_df = pivot_list_pandas_stack(raw_kill_list, 'attackers', 'killID')
-            print('--Time Elapsed: {}'.format(pandas_list_attackers_timer))
-        pandas_list_attackers_df.to_csv(
-            path.join(self.out_path, 'pandas_list_attackers_df.csv'),
-            index=False
-        )
+        if self.count <= 2000 or self.debug:
+            print('Pivoting Data -- List keys with Pandas (stack method)')
+            print('Items')
+            with Timer() as pandas_list_items_timer:
+                pandas_list_items_df = pivot_list_pandas_stack(raw_kill_list, 'items', 'killID')
+                print('--Time Elapsed: {}'.format(pandas_list_items_timer))
+            pandas_list_items_df.to_csv(
+                path.join(self.out_path, 'pandas_list_items_df.csv'),
+                index=False
+            )
+            print('Attackers')
+            with Timer() as pandas_list_attackers_timer:
+                pandas_list_attackers_df = pivot_list_pandas_stack(raw_kill_list, 'attackers', 'killID')
+                print('--Time Elapsed: {}'.format(pandas_list_attackers_timer))
+            pandas_list_attackers_df.to_csv(
+                path.join(self.out_path, 'pandas_list_attackers_df.csv'),
+                index=False
+            )
+        else:
+            print('************************************')
+            print('**** SKIPPING PANDAS STACK TEST ****')
+            print('************************************')
 
         print('Pivoting Data -- List keys with raw python')
         print('Items')
